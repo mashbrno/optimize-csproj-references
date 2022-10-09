@@ -98,7 +98,12 @@ foreach (var proj in projects)
         proj.ProjectRefs.Add(projRef);
     }
 }
-;
+
+foreach (var proj in projects)
+{
+    await RemoveUnnecessary(proj.ProjectRefs, IsProjectRequired, proj.Path, "ProjectReference", x => x.Name);
+    await RemoveUnnecessary(proj.PackageRefs, IsPackageRequired, proj.Path, "PackageReference", x => x.Identity.Id);
+}
 
     
 Console.WriteLine("Hello, World!");
@@ -121,4 +126,50 @@ async Task<IPackageSearchMetadata> FindPackage(string name, string version)
     }
 
     throw new KeyNotFoundException(name);
+}
+
+static async Task RemoveUnnecessary<T>(IList<T> list, Func<IList<T>, T, bool> isRequired, string csproj, string element, Func<T, string> name)
+{
+    for (var i = 0; i < list.Count;)
+    {
+        if (isRequired(list, list[i]))
+            i++;
+        else
+        {
+            var refName = name(list[i]);
+            await RemoveLine(csproj, element, refName);
+            Console.WriteLine($"Removing {refName} from {Path.GetFileName(csproj)}");
+            list.RemoveAt(i);
+        }
+    }
+}
+
+static async Task RemoveLine(string csproj, string element, string name)
+{
+    var lines = (await File.ReadAllLinesAsync(csproj)).ToList();
+    for (var i = 0; i < lines.Count;)
+    {
+        var match = Regex.Match(lines[i], @$"<{element}\s+Include=""{name}"".*/>", RegexOptions.IgnoreCase);
+        if (match.Success)
+            lines.RemoveAt(i);
+        else
+            i++;
+    }
+
+    await File.WriteAllLinesAsync(csproj, lines);
+}
+
+bool IsProjectRequired(IEnumerable<Project> list, Project project)
+{
+    return list.Except(new[] { project }).SelectMany(p => projects.Single(c => c == p).ProjectRefs).All(c => c != project);
+}
+
+bool IsPackageRequired(IEnumerable<IPackageSearchMetadata> list, IPackageSearchMetadata package)
+{
+    return list.Except(new[] { package }).SelectMany(p => GetPackageDependencies(packages.Single(c => c == p))).All(dep => dep != package.Identity.Id);
+}
+
+static IEnumerable<string> GetPackageDependencies(IPackageSearchMetadata package)
+{
+    throw new NotImplementedException();
 }
